@@ -9,7 +9,8 @@ A PySide6-based graphical application for solving and visualizing the classic N-
 - **Auto-Detection**: Automatically highlights attacking queen pairs with color-coded indicators
 - **Animated Solver**: Step-by-step backtracking algorithm visualization (speed: 6/10)
 - **Customizable Board Size**: Adjust N from 6 to 15 (default: 8)
-- **Random Placement**: Reset button randomly places queens for experimentation
+- **Make Puzzle**: Randomly places queens for manual solving
+- **Guides Toggle**: Slider to show/hide possible-move shading (when on, clash highlights are off)
 
 ## Installation
 

@@ -2,7 +2,7 @@ import sys
 import random
 import time
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                               QHBoxLayout, QPushButton, QSpinBox, QLabel, QMessageBox)
+                               QHBoxLayout, QPushButton, QSpinBox, QLabel, QSlider)
 from PySide6.QtCore import Qt, QTimer, QPoint, Signal, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QPainter, QColor, QFont, QDrag, QPixmap, QPainterPath
 
@@ -22,6 +22,7 @@ class ChessBoard(QWidget):
         self.drag_start_pos = None
         self.drag_current_pos = None
         self.attacking_pairs = []  # List of pairs of attacking queens
+        self.guides_enabled = False
         self.setMinimumSize(500, 500)
         self.setMouseTracking(True)
         
@@ -79,6 +80,27 @@ class ChessBoard(QWidget):
                 if self.areAttacking(q1, q2):
                     self.attacking_pairs.append((q1, q2))
                     
+    def setGuidesEnabled(self, enabled):
+        """Toggle guide highlights (possible-move shading)"""
+        self.guides_enabled = bool(enabled)
+        self.update()
+        
+    def getThreatenedSquares(self, queen):
+        """Get all squares a queen can attack (row, col, diagonals)"""
+        r, c = queen
+        squares = set()
+        for i in range(self.n):
+            squares.add((i, c))  # Same column
+        for j in range(self.n):
+            squares.add((r, j))  # Same row
+        for k in range(1, self.n):
+            for dr, dc in [(k, k), (k, -k), (-k, k), (-k, -k)]:
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < self.n and 0 <= nc < self.n:
+                    squares.add((nr, nc))
+        squares.discard((r, c))  # Exclude queen's own square
+        return squares
+        
     def areAttacking(self, q1, q2):
         """Check if two queens attack each other"""
         r1, c1 = q1
@@ -119,6 +141,7 @@ class ChessBoard(QWidget):
                 if (row, col) in self.queens:
                     self.dragging_queen = (row, col)
                     self.drag_start_pos = event.position().toPoint()
+                    self.drag_current_pos = event.position().toPoint()
                     
     def mouseMoveEvent(self, event):
         """Handle mouse move for dragging"""
@@ -173,28 +196,42 @@ class ChessBoard(QWidget):
                 else:
                     painter.fillRect(int(x), int(y), int(square_size), int(square_size), wooden_color)
         
-        # Highlight attacking pairs with different colors
-        attack_colors = [
-            QColor(255, 100, 100, 180),  # Light red
-            QColor(100, 150, 255, 180),  # Light blue
-            QColor(255, 200, 100, 180),  # Light orange
-            QColor(150, 255, 150, 180),  # Light green
-            QColor(255, 150, 255, 180),  # Light magenta
-            QColor(150, 255, 255, 180),  # Light cyan
-        ]
-        
-        # Draw attack highlights
-        for idx, (q1, q2) in enumerate(self.attacking_pairs):
-            color = attack_colors[idx % len(attack_colors)]
-            painter.setBrush(color)
-            painter.setPen(Qt.NoPen)
-            
-            # Highlight both squares
-            for q in [q1, q2]:
-                row, col = q
+        # Guides mode: shade possible-move squares for each queen (different color per queen)
+        # Clash mode: highlight attacking pairs (mutually exclusive with guides)
+        if self.guides_enabled:
+            guide_colors = [
+                QColor(255, 180, 180, 150),  # Light coral
+                QColor(180, 220, 180, 150),  # Light mint
+                QColor(220, 210, 150, 150),  # Light gold
+                QColor(200, 180, 220, 150),  # Light lavender
+                QColor(180, 210, 255, 150),  # Light sky blue
+                QColor(255, 220, 180, 150),  # Light peach
+                QColor(200, 255, 220, 150),  # Light seafoam
+                QColor(255, 200, 255, 150),  # Light pink
+                QColor(180, 255, 255, 150),  # Light cyan
+                QColor(255, 255, 180, 150),  # Light yellow
+            ]
+            # Track which square is shaded by which queen (last queen wins for overlaps)
+            square_color = {}
+            for idx, queen in enumerate(self.queens):
+                color = guide_colors[idx % len(guide_colors)]
+                for sq in self.getThreatenedSquares(queen):
+                    square_color[sq] = color
+            for (row, col), color in square_color.items():
                 x = margin_x + col * square_size
                 y = margin_y + row * square_size
-                painter.drawRect(int(x), int(y), int(square_size), int(square_size))
+                painter.fillRect(int(x), int(y), int(square_size), int(square_size), color)
+        else:
+            # Single clash color - avoids brown when 3+ queens overlap
+            clash_color = QColor(255, 120, 120, 160)  # Light coral red
+            clash_squares = set()
+            for q1, q2 in self.attacking_pairs:
+                clash_squares.add(q1)
+                clash_squares.add(q2)
+            for row, col in clash_squares:
+                x = margin_x + col * square_size
+                y = margin_y + row * square_size
+                painter.fillRect(int(x), int(y), int(square_size), int(square_size), clash_color)
         
         # Draw queens
         font = QFont("Arial", int(square_size * 0.6))
@@ -219,7 +256,7 @@ class ChessBoard(QWidget):
                            Qt.AlignCenter, "♛")
         
         # Draw dragging queen at mouse position
-        if self.dragging_queen and self.drag_start_pos:
+        if self.dragging_queen and self.drag_current_pos:
             x = self.drag_start_pos.x()
             y = self.drag_start_pos.y()
             painter.setPen(QColor(0, 0, 0))
@@ -334,13 +371,26 @@ class MainWindow(QMainWindow):
         self.solve_btn = QPushButton("Solve")
         self.solve_btn.clicked.connect(self.onSolve)
         
-        self.reset_btn = QPushButton("Reset")
-        self.reset_btn.clicked.connect(self.onReset)
+        self.make_puzzle_btn = QPushButton("Make Puzzle")
+        self.make_puzzle_btn.clicked.connect(self.onMakePuzzle)
+        
+        # Guides slider (0=off, 1=on)
+        guides_label = QLabel("Guides:")
+        self.guides_slider = QSlider(Qt.Horizontal)
+        self.guides_slider.setMinimum(0)
+        self.guides_slider.setMaximum(1)
+        self.guides_slider.setValue(0)
+        self.guides_slider.setFixedWidth(60)
+        self.guides_slider.setTickPosition(QSlider.TicksBelow)
+        self.guides_slider.setTickInterval(1)
+        self.guides_slider.valueChanged.connect(self.onGuidesChanged)
         
         control_layout.addWidget(n_label)
         control_layout.addWidget(self.n_spinbox)
+        control_layout.addWidget(guides_label)
+        control_layout.addWidget(self.guides_slider)
         control_layout.addStretch()
-        control_layout.addWidget(self.reset_btn)
+        control_layout.addWidget(self.make_puzzle_btn)
         control_layout.addWidget(self.solve_btn)
         
         # Chessboard
@@ -379,10 +429,14 @@ class MainWindow(QMainWindow):
         else:
             self.status_label.setText("No solution found")
             
-    def onReset(self):
-        """Handle reset button click"""
+    def onMakePuzzle(self):
+        """Handle Make Puzzle button - randomly place queens"""
         self.board.randomPlaceQueens()
-        self.status_label.setText("Queens randomly placed - Manual Mode")
+        self.status_label.setText("Puzzle created - Drag queens to solve")
+        
+    def onGuidesChanged(self, value):
+        """Handle guides slider - 0=off, 1=on"""
+        self.board.setGuidesEnabled(value == 1)
 
 
 def main():
