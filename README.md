@@ -72,6 +72,9 @@ The solver algorithm will be enhanced in future versions with:
 - Solution counting and enumeration features
 - Export/import functionality for board states
 
+## exe file
+This file is added for those who dont have python on their system. so it is ready to run file, and it doesnot require you to put python on your device. just double click and it runs. but it is the very basic version and will be updated later.
+
 ## Requirements
 
 - Python 3.7+
